@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Auto Video Editor – Biên tập video tự động offline</title>
+  <meta name="description" content="Cắt khoảng lặng, phụ đề karaoke, lồng tiếng, Auto Zoom, chỉnh màu và đổi tỷ lệ video hoàn toàn trên máy bạn với FFmpeg, Whisper và edge-tts.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg-orb orb-a"></div><div class="bg-orb orb-b"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 5 3-5 3z"/></svg>
+    </span>
+    <div><h1>Auto Video Editor</h1><p>100% Offline/Zero-API · Tối ưu cho PC & Điện thoại</p></div>
+  </div>
+  <div class="chips">
+    <span class="chip" id="gpuChip">GPU: đang kiểm tra…</span>
+    <span class="chip chip-soft" id="mobileIpBadge" title="Mở link này trên điện thoại cùng mạng Wi-Fi">📱 ĐT: 192.168.1.28:8080</span>
+  </div>
+</header>
+
+<!-- Mobile Navigation Tabs (Shown only on small screens) -->
+<nav class="mobile-tabs" id="mobileTabs" aria-label="Tab điều hướng di động">
+  <button type="button" class="m-tab active" data-tab="col-left">🎬 Video & Timeline</button>
+  <button type="button" class="m-tab" data-tab="col-right">⚙️ Tùy chọn biên tập</button>
+</nav>
+
+<main class="layout">
+  <!-- LEFT: preview + timeline -->
+  <section class="col-left tab-pane active" id="paneLeft">
+    <div class="card preview-card">
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả video">
+        <div class="dz-icon">
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        </div>
+        <strong>Chạm hoặc kéo video vào đây</strong>
+        <span>Hỗ trợ MP4, MOV, MKV, WebM từ điện thoại & máy tính</span>
+        <input id="fileInput" type="file" accept="video/*" hidden>
+      </div>
+      <div id="playerWrap" class="player-wrap" hidden>
+        <video id="player" controls playsinline></video>
+        <div class="player-meta">
+          <span id="fileMeta"></span>
+          <button class="link-btn" id="changeFile" type="button">Đổi video khác</button>
+        </div>
+      </div>
+      <div id="uploadBar" class="mini-bar" hidden><div></div></div>
+    </div>
+
+    <div class="card timeline-card">
+      <div class="card-head">
+        <h2>Timeline thông minh</h2>
+        <span id="tlStats" class="muted">Tải video để phân tích khoảng lặng</span>
+      </div>
+      <div id="timeline" class="timeline" aria-label="Timeline khoảng lặng">
+        <div id="tlTrack" class="tl-track"></div>
+        <div id="tlHead" class="tl-head"></div>
+      </div>
+      <div class="legend">
+        <span><i class="dot keep"></i>Giữ lại</span>
+        <span><i class="dot cut"></i>Sẽ bị cắt</span>
+        <span id="tlBusy" class="muted" hidden>Đang phân tích…</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: options -->
+  <section class="col-right tab-pane" id="paneRight">
+    <!-- 1. Smart Silence Remover -->
+    <div class="card opt" data-opt="silence">
+      <label class="opt-head">
+        <span class="opt-title"><i class="ico ico-scissors"></i>Cắt khoảng lặng</span>
+        <span class="switch"><input type="checkbox" id="cutSilence"><span class="slider"></span></span>
+      </label>
+      <div class="opt-body">
+        <div class="field"><label for="minSilence">Im lặng dài hơn <b id="minSilenceV">0.5</b> s</label>
+          <input type="range" id="minSilence" min="0.2" max="2" step="0.1" value="0.5"></div>
+        <div class="field"><label for="noiseDb">Ngưỡng ồn <b id="noiseDbV">-35</b> dB</label>
+          <input type="range" id="noiseDb" min="-60" max="-15" step="1" value="-35"></div>
+      </div>
+    </div>
+
+    <!-- 2. Auto Karaoke Subtitles & Editor -->
+    <div class="card opt" data-opt="subs">
+      <label class="opt-head">
+        <span class="opt-title"><i class="ico ico-sub"></i>Phụ đề karaoke (CapCut)</span>
+        <span class="switch"><input type="checkbox" id="subsOn"><span class="slider"></span></span>
+      </label>
+      <div class="opt-body">
+        <div class="row2">
+          <div class="field"><label for="subModel">Model Whisper</label>
+            <select id="subModel"><option value="base">base (nhanh)</option><option value="small" selected>small (chính xác)</option></select></div>
+          <div class="field"><label for="subLang">Ngôn ngữ</label>
+            <select id="subLang"><option value="vi" selected>Tiếng Việt</option><option value="en">English</option><option value="">Tự nhận diện</option></select></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="subFontSize">Cỡ chữ phụ đề</label>
+            <select id="subFontSize">
+              <option value="36">Nhỏ gọn (36px)</option>
+              <option value="42">Vừa thanh mảnh (42px)</option>
+              <option value="48" selected>Chuẩn CapCut (48px - Vừa vặn nhất)</option>
+              <option value="56">Lớn rõ nét (56px)</option>
+              <option value="66">Rất to (66px)</option>
+            </select>
+          </div>
+          <div class="field"><label>Màu từ đang đọc</label>
+            <div class="swatches" id="swatches">
+              <button type="button" class="sw active" data-c="#FFD400" style="--c:#FFD400" aria-label="Vàng"></button>
+              <button type="button" class="sw" data-c="#7CFFB2" style="--c:#7CFFB2" aria-label="Xanh lá"></button>
+              <button type="button" class="sw" data-c="#FF7AA8" style="--c:#FF7AA8" aria-label="Hồng"></button>
+              <button type="button" class="sw" data-c="#6EC6FF" style="--c:#6EC6FF" aria-label="Xanh dương"></button>
+              <button type="button" class="sw" data-c="#FF9F43" style="--c:#FF9F43" aria-label="Cam"></button>
+            </div>
+          </div>
+        </div>
+        <!-- Subtitle Editor Button -->
+        <button type="button" id="openSubEditorBtn" class="btn-sub-edit">
+          <span>✏️ Mở trình chỉnh sửa từng câu phụ đề</span>
+        </button>
+        <span id="customAssStatus" class="sub-edited-badge" hidden>✓ Đã lưu nội dung phụ đề chỉnh sửa</span>
+      </div>
+    </div>
+
+    <!-- 3. AI Script & Dubbing -->
+    <div class="card opt" data-opt="dub">
+      <label class="opt-head">
+        <span class="opt-title"><i class="ico ico-mic"></i>Lồng tiếng + nhạc nền (Ducking)</span>
+        <span class="switch"><input type="checkbox" id="dubOn"><span class="slider"></span></span>
+      </label>
+      <div class="opt-body">
+        <div class="ai-box">
+          <div class="ai-head">
+            <span class="ai-badge">✨ AI Viết Content Tự Động</span>
+            <button type="button" id="toggleAiBtn" class="link-btn">Tự tạo kịch bản theo video</button>
+          </div>
+          <div id="aiForm" class="ai-form" hidden>
+            <div class="field">
+              <label for="aiStyle">Phong cách kịch bản</label>
+              <select id="aiStyle">
+                <option value="tiktok_viral" selected>🔥 TikTok / Reels bắt trend (Hook mở đầu mạnh)</option>
+                <option value="review">⭐ Đánh giá, Review trải nghiệm chân thực</option>
+                <option value="storytelling">📖 Kể chuyện cảm xúc, truyền cảm hứng</option>
+                <option value="sales">🎯 Bán hàng, giới thiệu sản phẩm & kêu gọi hành động</option>
+                <option value="news">⚡ Tin tức nhanh, tóm tắt súc tích</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="aiTopic">Gợi ý chủ đề / sản phẩm (tuỳ chọn)</label>
+              <input type="text" id="aiTopic" placeholder="VD: Review quán cafe, đồ ăn, tin công nghệ...">
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label for="aiProvider">Nguồn AI</label>
+                <select id="aiProvider">
+                  <option value="auto" selected>Tự động (Offline + Free)</option>
+                  <option value="gemini">Google Gemini Free API</option>
+                  <option value="ollama">Ollama Local (100% Offline)</option>
+                </select>
+              </div>
+              <div class="field" id="geminiKeyField" hidden>
+                <label for="geminiKey">Gemini API Key</label>
+                <input type="password" id="geminiKey" placeholder="Dán key từ Google AI Studio">
+              </div>
+            </div>
+            <button type="button" id="genScriptBtn" class="btn-ai">
+              <span>Tạo kịch bản AI ngay</span>
+            </button>
+            <p id="aiMsg" class="muted" style="margin:4px 0 0; font-size:.82rem;"></p>
+          </div>
+        </div>
+
+        <div class="field"><label for="script">Kịch bản lồng tiếng</label>
+          <textarea id="script" rows="3" placeholder="Nhập kịch bản hoặc bấm nút AI ở trên để tự viết…"></textarea></div>
+        <div class="row2">
+          <div class="field"><label for="voice">Giọng đọc</label>
+            <select id="voice"><option value="hoaimy">Hoài My (nữ)</option><option value="namminh">Nam Minh (nam)</option></select></div>
+          <div class="field"><label for="rate">Tốc độ <b id="rateV">+0%</b></label>
+            <input type="range" id="rate" min="-30" max="40" step="5" value="0"></div>
+        </div>
+        <div class="field"><label for="bgmFile">Nhạc nền (tuỳ chọn)</label>
+          <input type="file" id="bgmFile" accept="audio/*" class="file-input"></div>
+        <div class="field"><label for="bgmVol">Âm lượng nhạc nền <b id="bgmVolV">35</b>%</label>
+          <input type="range" id="bgmVol" min="5" max="100" step="5" value="35"></div>
+      </div>
+    </div>
+
+    <!-- 4. Visual Effects & Color Grading (Auto Zoom & LUTs) -->
+    <div class="card opt" data-opt="fx">
+      <label class="opt-head">
+        <span class="opt-title"><i class="ico ico-sparkle"></i>Hiệu ứng hình ảnh & Màu sắc</span>
+        <span class="switch"><input type="checkbox" id="fxOn"><span class="slider"></span></span>
+      </label>
+      <div class="opt-body">
+        <div class="field checkbox-field">
+          <label class="check-label">
+            <input type="checkbox" id="autoZoom">
+            <span>🔍 <b>Auto Zoom (Dynamic Punch-in)</b>: Tự phóng to 1.15x đổi nhịp mỗi 4s</span>
+          </label>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="colorPreset">Bộ lọc màu điện ảnh (LUTs)</label>
+            <select id="colorPreset">
+              <option value="none" selected>Không dùng (Màu gốc)</option>
+              <option value="cinematic">🎬 Điện ảnh Teal & Orange</option>
+              <option value="warm_pastel">🌸 Tone ấm Pastel dịu mắt</option>
+              <option value="korean_clean">❄️ Tone lạnh Hàn Quốc trong trẻo</option>
+              <option value="vibrant">🔥 Tươi sáng rực rỡ (TikTok)</option>
+              <option value="vintage">🎞️ Cổ điển Vintage/Retro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="watermarkText">Chữ ký / Watermark (tuỳ chọn)</label>
+            <input type="text" id="watermarkText" placeholder="@ten_kenh_cua_ban">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Aspect Ratio & Format -->
+    <div class="card opt always-open">
+      <div class="opt-head static"><span class="opt-title"><i class="ico ico-frame"></i>Khung hình & Xuất video</span></div>
+      <div class="opt-body">
+        <div class="seg" id="aspectSeg" role="radiogroup" aria-label="Tỷ lệ khung hình">
+          <button type="button" class="active" data-v="original">Gốc</button>
+          <button type="button" data-v="9:16">9:16 Dọc</button>
+          <button type="button" data-v="1:1">1:1</button>
+          <button type="button" data-v="16:9">16:9</button>
+        </div>
+        <div class="seg" id="modeSeg" role="radiogroup" aria-label="Kiểu chuyển khung">
+          <button type="button" class="active" data-v="blur">Nền mờ</button>
+          <button type="button" data-v="crop">Cắt (crop)</button>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="fps">FPS</label>
+            <select id="fps"><option value="60" selected>60 fps</option><option value="30">30 fps</option><option value="0">Giữ nguyên</option></select></div>
+          <div class="field"><label for="useGpu">Bộ mã hoá</label>
+            <select id="useGpu"><option value="true" selected>GPU (h264_nvenc)</option><option value="false">CPU (libx264)</option></select></div>
+        </div>
+      </div>
+    </div>
+
+    <button id="renderBtn" class="btn-primary" type="button" disabled>
+      <span>Bắt đầu xử lý video</span>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+    </button>
+  </section>
+</main>
+
+<!-- Interactive Subtitle Editor Modal -->
+<div id="subModal" class="modal-backdrop" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>✏️ Chỉnh sửa phụ đề trực quan</h3>
+      <button type="button" id="closeSubModal" class="close-btn" aria-label="Đóng">&times;</button>
+    </div>
+    <p class="muted" style="margin:4px 0 12px; font-size:.85rem;">Bấm vào từng câu để sửa lại từ ngữ/chính tả theo ý bạn:</p>
+    <div id="subList" class="sub-list">
+      <p class="muted" style="text-align:center; padding:20px;">Đang tải phụ đề từ video…</p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" id="saveSubBtn" class="btn-primary small">Lưu thay đổi phụ đề</button>
+      <button type="button" id="cancelSubBtn" class="btn-ghost">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<!-- Progress / result drawer -->
+<section id="jobPanel" class="job-panel" hidden aria-live="polite">
+  <div class="job-inner">
+    <div class="job-top">
+      <div><h2 id="jobTitle">Đang xử lý…</h2><p id="jobMsg" class="muted"></p></div>
+      <div class="job-pct" id="jobPct">0%</div>
+    </div>
+    <div class="bar"><div id="barFill"></div></div>
+    <ol id="stageList" class="stages"></ol>
+    <div id="result" class="result" hidden>
+      <video id="resultVideo" controls playsinline></video>
+      <div class="result-actions">
+        <a id="downloadBtn" class="btn-primary small" href="#" download>Tải video về máy</a>
+        <button id="newJob" class="btn-ghost" type="button">Biên tập video khác</button>
+      </div>
+    </div>
+    <p id="errorBox" class="error" hidden></p>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
