@@ -1,7 +1,10 @@
 """Video effects: Color grading presets, dynamic Auto Zoom (Punch-in), and Watermarks."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
+
+from .ffmpeg_utils import escape_filter_path
 
 # Pre-tuned color grading filters using native FFmpeg eq and colorbalance
 COLOR_PRESETS: dict[str, str] = {
@@ -12,6 +15,21 @@ COLOR_PRESETS: dict[str, str] = {
     "vintage": "eq=contrast=1.12:saturation=0.78:brightness=-0.02,colorbalance=rs=0.07:gs=0.01:bs=-0.05",
     "vibrant": "eq=saturation=1.35:contrast=1.12:brightness=0.01",
 }
+
+
+def get_system_font() -> Optional[str]:
+    """Find a standard TTF/OTF font on Windows/macOS/Linux to avoid Fontconfig crashes."""
+    candidates = [
+        Path("C:/Windows/Fonts/arial.ttf"),
+        Path("C:/Windows/Fonts/segoeui.ttf"),
+        Path("C:/Windows/Fonts/tahoma.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/System/Library/Fonts/Helvetica.ttc"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return escape_filter_path(p)
+    return None
 
 
 def build_punch_in_filter(interval: float = 4.0, zoom_factor: float = 1.15) -> str:
@@ -25,7 +43,7 @@ def build_punch_in_filter(interval: float = 4.0, zoom_factor: float = 1.15) -> s
 
 
 def build_watermark_filter(text: str, position: str = "top_right", font_size: int = 24) -> str:
-    """Draw simple clean text watermark / channel handle."""
+    """Draw simple clean text watermark / channel handle with explicit fontfile."""
     clean_text = text.replace("'", "").replace(":", "").strip()
     if not clean_text:
         return ""
@@ -36,4 +54,6 @@ def build_watermark_filter(text: str, position: str = "top_right", font_size: in
         "bottom_left": "x=28:y=h-th-28",
     }
     coord = pos_map.get(position, pos_map["top_right"])
-    return f"drawtext=text='{clean_text}':fontcolor=white@0.75:fontsize={font_size}:{coord}:shadowcolor=black@0.5:shadowx=2:shadowy=2"
+    font_file = get_system_font()
+    font_arg = f"fontfile='{font_file}':" if font_file else ""
+    return f"drawtext={font_arg}text='{clean_text}':fontcolor=white@0.75:fontsize={font_size}:{coord}:shadowcolor=black@0.5:shadowx=2:shadowy=2"
